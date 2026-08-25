@@ -33,7 +33,9 @@ let historialNotificaciones = [];
 app.post('/api/air-quality', async (req, res) => {
   try {
     const { ppm, estado } = req.body;
-    const estadoPrevio = estadoActualGlobal.estado; // Guardamos el estado anterior antes de actualizar
+    console.log("--> Petición recibida:", req.body);
+
+    const estadoPrevio = estadoActualGlobal.estado;
 
     const nuevoRegistro = {
       ppm: parseFloat(ppm),
@@ -43,10 +45,11 @@ app.post('/api/air-quality', async (req, res) => {
 
     estadoActualGlobal = nuevoRegistro;
 
-    // Guardar en la base de datos Firestore
+    // Intentar guardar en Firestore
     await db.collection('lecturas').add(nuevoRegistro);
+    console.log("--> Guardado exitosamente en Firestore");
 
-    // Lógica de notificaciones comparando con el estado previo
+    // Lógica de notificaciones
     if (estado !== estadoPrevio) {
       if (!estadoPendiente || estadoPendiente.nuevoEstado !== estado) {
         if (temporizadorConfirmacion) clearTimeout(temporizadorConfirmacion);
@@ -78,8 +81,10 @@ app.post('/api/air-quality', async (req, res) => {
 
     return res.status(200).json({ status: "OK", message: "Lectura guardada correctamente." });
   } catch (error) {
-    console.error("Error al procesar datos:", error);
-    return res.status(500).json({ error: "Error interno en el servidor." });
+    // Imprime la traza completa del error en los Logs de Render
+    console.error("CRITICAL DATABASE ERROR:", error.message);
+    console.error(error.stack);
+    return res.status(500).json({ error: error.message });
   }
 });
 
@@ -113,8 +118,13 @@ app.get('/api/air-quality/history', async (req, res) => {
     res.json(historial);
   } catch (error) {
     console.error("Error consultando historial:", error);
-    res.status(500).json({ error: "Error consultando el historial." });
+    res.status(500).json({ error: error.message });
   }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Servidor de monitoreo IoT activo en http://localhost:${PORT}`);
 });
 
 const PORT = process.env.PORT || 3000;
