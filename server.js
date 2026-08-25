@@ -33,6 +33,8 @@ let historialNotificaciones = [];
 app.post('/api/air-quality', async (req, res) => {
   try {
     const { ppm, estado } = req.body;
+    const estadoPrevio = estadoActualGlobal.estado; // Guardamos el estado anterior antes de actualizar
+
     const nuevoRegistro = {
       ppm: parseFloat(ppm),
       estado: estado,
@@ -44,8 +46,8 @@ app.post('/api/air-quality', async (req, res) => {
     // Guardar en la base de datos Firestore
     await db.collection('lecturas').add(nuevoRegistro);
 
-    // Lógica de notificaciones con confirmación de 30 segundos
-    if (estado !== estadoActualGlobal.estado) {
+    // Lógica de notificaciones comparando con el estado previo
+    if (estado !== estadoPrevio) {
       if (!estadoPendiente || estadoPendiente.nuevoEstado !== estado) {
         if (temporizadorConfirmacion) clearTimeout(temporizadorConfirmacion);
 
@@ -55,7 +57,7 @@ app.post('/api/air-quality', async (req, res) => {
           const notificacion = {
             id: Date.now(),
             mensaje: `Alerta: La calidad del aire ha cambiado a ${estado}`,
-            estadoPrevio: estadoActualGlobal.estado,
+            estadoPrevio: estadoPrevio,
             nuevoEstado: estado,
             fecha: new Date().toISOString()
           };
