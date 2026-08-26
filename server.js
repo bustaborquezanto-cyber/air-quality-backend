@@ -7,16 +7,23 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Cargar credencial desde la Variable de Entorno de Render
+// ============================================================
+// CONFIGURACIÓN DE FIREBASE - VERSIÓN PARA RENDER
+// ============================================================
 let serviceAccount;
 try {
+  // PRIMERO: Intentar usar la variable de entorno de Render
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    console.log("📦 Usando credenciales desde Variable de Entorno");
     serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
   } else {
+    // SEGUNDO: Si no existe variable, buscar el archivo local (para desarrollo)
+    console.log("📁 Buscando archivo local serviceAccountKey.json");
     serviceAccount = require('./serviceAccountKey.json');
   }
 } catch (err) {
-  console.error("Error al parsear la clave de Firebase:", err.message);
+  console.error("❌ Error al cargar las credenciales de Firebase:", err.message);
+  console.error("💡 Asegúrate de configurar FIREBASE_SERVICE_ACCOUNT en Render");
   process.exit(1);
 }
 
@@ -26,11 +33,14 @@ initializeApp({
 });
 
 const db = getFirestore();
+console.log("✅ Firebase conectado correctamente");
 
-// Estado actual en memoria
+// ============================================================
+// VARIABLES DE ESTADO
+// ============================================================
 let estadoActualGlobal = {
   ppm: 0,
-  estado: "BUENA",
+  estado: "DESCONOCIDO",
   timestamp: new Date()
 };
 
@@ -39,75 +49,134 @@ let temporizadorConfirmacion = null;
 const TIEMPO_CONFIRMACION_MS = 30000;
 let historialNotificaciones = [];
 
-// Endpoint POST: Recibir lecturas del ESP32
+// ============================================================
+// ENDPOINT POST - Recibir datos del ESP32
+// ============================================================
 app.post('/api/air-quality', async (req, res) => {
   try {
     const { ppm, estado } = req.body;
+    
+    // Validar datos
+    if (ppm === undefined || !estado) {
+      return res.status(400).json({ 
+        error: "Faltan datos: ppm y estado son requeridos" 
+      });
+    }
+
     const estadoPrevio = estadoActualGlobal.estado;
+    console.log(`📨 Recibido: ${ppm} PPM - ${estado}`);
 
     const nuevoRegistro = {
       ppm: parseFloat(ppm),
       estado: estado,
-      timestamp: new Date()
+      timestamp: new Date(),
+      fecha: new Date().toISOString()
     };
 
     estadoActualGlobal = nuevoRegistro;
 
     // Guardar en Firestore
-    await db.collection('lecturas').add(nuevoRegistro);
+    try {
+      await db.collection('lecturas').add(nuevoRegistro);
+      console.log("💾 Datos guardados en Firestore");
+    } catch (dbError) {
+      console.error("⚠️ Error guardando en Firestore:", dbError.message);
+      // No detenemos la ejecución, seguimos con la notificación
+    }
 
-    // Lógica de notificaciones
+    // ============================================================
+    // LÓGICA DE NOTIFICACIONES (CON RETRASO DE 30 SEGUNDOS)
+    // ============================================================
     if (estado !== estadoPrevio) {
-      if (!estadoPendiente || estadoPendiente.nuevoEstado !== estado) {
-        if (temporizadorConfirmacion) clearTimeout(temporizadorConfirmacion);
+      console.log(`🔄 Cambio detectado: ${estadoPrevio} → ${estado}`);
+      
+      // Cancelar notificación pendiente anterior
+      if (temporizadorConfirmacion) {
+        clearTimeout(temporizadorConfirmacion);
+        temporizadorConfirmacion = null;
+      }
 
-        estadoPendiente = { nuevoEstado: estado, tiempoDetectado: Date.now() };
+      // Guardar estado pendiente
+      estadoPendiente = { 
+        nuevoEstado: estado, 
+        tiempoDetectado: Date.now() 
+      };
 
-        temporizadorConfirmacion = setTimeout(() => {
+      // Programar notificación en 30 segundos
+      temporizadorConfirmacion = setTimeout(() => {
+        // Verificar que el estado siga siendo el mismo
+        if (estadoActualGlobal.estado === estado) {
           const notificacion = {
             id: Date.now(),
-            mensaje: `Alerta: La calidad del aire ha cambiado a ${estado}`,
+            mensaje: `🔔 Calidad del aire cambió a ${estado}`,
             estadoPrevio: estadoPrevio,
             nuevoEstado: estado,
-            fecha: new Date().toISOString()
+            ppm: ppm,
+            fecha: new Date().toISOString(),
+            timestamp: Date.now()
           };
 
           historialNotificaciones.unshift(notificacion);
-          if (historialNotificaciones.length > 20) historialNotificaciones.pop();
+          if (historialNotificaciones.length > 50) historialNotificaciones.pop();
 
-          estadoActualGlobal.estado = estado;
-          estadoPendiente = null;
-        }, TIEMPO_CONFIRMACION_MS);
-      }
-    } else {
-      if (temporizadorConfirmacion && estadoPendiente && estadoPendiente.nuevoEstado !== estado) {
-        clearTimeout(temporizadorConfirmacion);
+          console.log(`✅ NOTIFICACIÓN ENVIADA: ${estado} (${ppm} PPM)`);
+          
+          // Guardar notificación en Firestore
+          try {
+            db.collection('notificaciones').add(notificacion);
+          } catch (e) {
+            console.error("Error guardando notificación:", e.message);
+          }
+        } else {
+          console.log(`⏭️ Notificación cancelada: el estado cambió nuevamente`);
+        }
+        
         estadoPendiente = null;
-      }
+        temporizadorConfirmacion = null;
+      }, TIEMPO_CONFIRMACION_MS);
+      
+      console.log(`⏰ Notificación programada en ${TIEMPO_CONFIRMACION_MS/1000} segundos`);
     }
 
-    return res.status(200).json({ status: "OK", message: "Lectura guardada correctamente." });
+    res.status(200).json({ 
+      status: "OK", 
+      message: "Lectura guardada correctamente",
+      notificacion_programada: estadoPendiente !== null
+    });
+
   } catch (error) {
-    console.error("Error al procesar datos:", error);
-    return res.status(500).json({ error: error.message });
+    console.error("❌ Error al procesar datos:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Endpoint GET: Consultar estado actual
+// ============================================================
+// ENDPOINT GET - Estado actual
+// ============================================================
 app.get('/api/air-quality/current', (req, res) => {
   res.json({
-    actual: estadoActualGlobal,
-    notificaciones: historialNotificaciones
+    success: true,
+    datos: {
+      ppm: estadoActualGlobal.ppm,
+      estado: estadoActualGlobal.estado,
+      timestamp: estadoActualGlobal.timestamp,
+      fecha: estadoActualGlobal.fecha || new Date().toISOString()
+    },
+    notificaciones: historialNotificaciones.slice(0, 10)
   });
 });
 
-// Endpoint GET: Consultar historial de las últimas 24h
+// ============================================================
+// ENDPOINT GET - Historial (últimas 24 horas)
+// ============================================================
 app.get('/api/air-quality/history', async (req, res) => {
   try {
     const hace24Horas = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    
     const snapshot = await db.collection('lecturas')
       .where('timestamp', '>=', hace24Horas)
       .orderBy('timestamp', 'asc')
+      .limit(1000)
       .get();
 
     const historial = [];
@@ -116,15 +185,42 @@ app.get('/api/air-quality/history', async (req, res) => {
       historial.push({
         ppm: data.ppm,
         estado: data.estado,
-        timestamp: data.timestamp.toDate()
+        timestamp: data.timestamp.toDate ? data.timestamp.toDate() : data.timestamp,
+        fecha: data.fecha || new Date(data.timestamp).toISOString()
       });
     });
 
-    res.json(historial);
+    res.json({
+      success: true,
+      historial: historial
+    });
   } catch (error) {
-    console.error("Error consultando historial:", error);
+    console.error("❌ Error consultando historial:", error);
     res.status(500).json({ error: error.message });
   }
+});
+
+// ============================================================
+// ENDPOINT GET - Notificaciones
+// ============================================================
+app.get('/api/air-quality/notifications', (req, res) => {
+  res.json({
+    success: true,
+    notificaciones: historialNotificaciones
+  });
+});
+
+// ============================================================
+// INICIAR SERVIDOR
+// ============================================================
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor de monitoreo IoT activo en puerto ${PORT}`);
+  console.log(`📡 Endpoints:`);
+  console.log(`   POST /api/air-quality`);
+  console.log(`   GET  /api/air-quality/current`);
+  console.log(`   GET  /api/air-quality/history`);
+  console.log(`   GET  /api/air-quality/notifications`);
 });
 
 const PORT = process.env.PORT || 3000;
