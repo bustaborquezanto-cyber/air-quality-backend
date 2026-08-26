@@ -1,18 +1,18 @@
 {
   "name": "air-quality-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Backend para monitoreo de calidad del aire con ESP32",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js"
   },
-  "keywords": [],
+  "keywords": ["iot", "air-quality", "esp32", "firebase"],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
     "cors": "^2.8.6",
-    "express": "^5.2.1",
-    "firebase-admin": "^14.3.0"
+    "express": "^4.18.2",
+    "firebase-admin": "^12.0.0"
   }
 }
