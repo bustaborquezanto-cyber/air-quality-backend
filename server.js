@@ -7,8 +7,18 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Cargar la clave de Firebase guardada en la misma carpeta
-const serviceAccount = require('./serviceAccountKey.json');
+// Cargar credencial desde la Variable de Entorno de Render
+let serviceAccount;
+try {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  } else {
+    serviceAccount = require('./serviceAccountKey.json');
+  }
+} catch (err) {
+  console.error("Error al parsear la clave de Firebase:", err.message);
+  process.exit(1);
+}
 
 // Inicializar Firebase Admin
 initializeApp({
@@ -26,15 +36,13 @@ let estadoActualGlobal = {
 
 let estadoPendiente = null;
 let temporizadorConfirmacion = null;
-const TIEMPO_CONFIRMACION_MS = 30000; // 30 segundos
+const TIEMPO_CONFIRMACION_MS = 30000;
 let historialNotificaciones = [];
 
 // Endpoint POST: Recibir lecturas del ESP32
 app.post('/api/air-quality', async (req, res) => {
   try {
     const { ppm, estado } = req.body;
-    console.log("--> Petición recibida:", req.body);
-
     const estadoPrevio = estadoActualGlobal.estado;
 
     const nuevoRegistro = {
@@ -45,9 +53,8 @@ app.post('/api/air-quality', async (req, res) => {
 
     estadoActualGlobal = nuevoRegistro;
 
-    // Intentar guardar en Firestore
+    // Guardar en Firestore
     await db.collection('lecturas').add(nuevoRegistro);
-    console.log("--> Guardado exitosamente en Firestore");
 
     // Lógica de notificaciones
     if (estado !== estadoPrevio) {
@@ -81,9 +88,7 @@ app.post('/api/air-quality', async (req, res) => {
 
     return res.status(200).json({ status: "OK", message: "Lectura guardada correctamente." });
   } catch (error) {
-    // Imprime la traza completa del error en los Logs de Render
-    console.error("CRITICAL DATABASE ERROR:", error.message);
-    console.error(error.stack);
+    console.error("Error al procesar datos:", error);
     return res.status(500).json({ error: error.message });
   }
 });
@@ -120,11 +125,6 @@ app.get('/api/air-quality/history', async (req, res) => {
     console.error("Error consultando historial:", error);
     res.status(500).json({ error: error.message });
   }
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Servidor de monitoreo IoT activo en http://localhost:${PORT}`);
 });
 
 const PORT = process.env.PORT || 3000;
