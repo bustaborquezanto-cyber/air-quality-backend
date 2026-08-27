@@ -81,7 +81,6 @@ app.post('/api/air-quality', async (req, res) => {
       console.log("💾 Datos guardados en Firestore");
     } catch (dbError) {
       console.error("⚠️ Error guardando en Firestore:", dbError.message);
-      // No detenemos la ejecución, seguimos con la notificación
     }
 
     // ============================================================
@@ -104,7 +103,6 @@ app.post('/api/air-quality', async (req, res) => {
 
       // Programar notificación en 30 segundos
       temporizadorConfirmacion = setTimeout(() => {
-        // Verificar que el estado siga siendo el mismo
         if (estadoActualGlobal.estado === estado) {
           const notificacion = {
             id: Date.now(),
@@ -121,7 +119,6 @@ app.post('/api/air-quality', async (req, res) => {
 
           console.log(`✅ NOTIFICACIÓN ENVIADA: ${estado} (${ppm} PPM)`);
           
-          // Guardar notificación en Firestore
           try {
             db.collection('notificaciones').add(notificacion);
           } catch (e) {
@@ -173,9 +170,9 @@ app.get('/api/air-quality/history', async (req, res) => {
   try {
     const hace24Horas = new Date(Date.now() - 24 * 60 * 60 * 1000);
     
+    // Se elimina el .orderBy para evitar pedir índices compuestos a Firestore
     const snapshot = await db.collection('lecturas')
       .where('timestamp', '>=', hace24Horas)
-      .orderBy('timestamp', 'asc')
       .limit(1000)
       .get();
 
@@ -189,6 +186,9 @@ app.get('/api/air-quality/history', async (req, res) => {
         fecha: data.fecha || new Date(data.timestamp).toISOString()
       });
     });
+
+    // Ordenar de forma ascendente en memoria
+    historial.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
     res.json({
       success: true,
@@ -221,9 +221,4 @@ app.listen(PORT, () => {
   console.log(`   GET  /api/air-quality/current`);
   console.log(`   GET  /api/air-quality/history`);
   console.log(`   GET  /api/air-quality/notifications`);
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Servidor de monitoreo IoT activo en http://localhost:${PORT}`);
 });
