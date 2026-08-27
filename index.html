@@ -3,28 +3,71 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Monitoreo de Calidad del Aire</title>
+  <title>Air Watch - Monitoreo de Aire</title>
   <style>
-    body { font-family: Arial, sans-serif; background: #121212; color: #fff; text-align: center; padding: 20px; }
-    .card { background: #1e1e1e; padding: 20px; border-radius: 12px; max-width: 400px; margin: 20px auto; }
-    .btn { background: #6200ee; color: #fff; border: none; padding: 12px 20px; border-radius: 8px; font-size: 16px; cursor: pointer; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #fff; text-align: center; margin: 0; padding: 20px; }
+    .container { max-width: 450px; margin: 0 auto; }
+    .card { background: #1e1e1e; padding: 25px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); margin-top: 20px; }
+    .status-box { font-size: 24px; font-weight: bold; padding: 15px; border-radius: 10px; margin: 20px 0; background: #333; }
+    .ppm-value { font-size: 48px; font-weight: bold; margin: 10px 0; color: #4fc3f7; }
+    .btn { background: #6200ee; color: #fff; border: none; padding: 14px 24px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; width: 100%; }
     .btn:hover { background: #3700b3; }
+    /* Colores por estado */
+    .BUENO { background: #2e7d32; color: #fff; }
+    .MODERADO { background: #f9a825; color: #000; }
+    .MALO { background: #c62828; color: #fff; }
+    .MUY_MALO { background: #6a1b9a; color: #fff; }
   </style>
 </head>
 <body>
-  <h1>💨 Calidad del Aire IoT</h1>
-  <div class="card">
-    <h2>Estado Actual</h2>
-    <p id="ppm">Cargando datos...</p>
-    <p id="estado">...</p>
-    <button class="btn" onclick="pedirPermiso()">🔔 Activar Notificaciones Push</button>
+  <div class="container">
+    <h1>💨 Air Watch</h1>
+    <div class="card">
+      <div class="ppm-value" id="ppm">-- PPM</div>
+      <div class="status-box" id="estado">Cargando...</div>
+      <p id="ultima-act" style="color: #aaa; font-size: 12px;"></p>
+      <button class="btn" onclick="pedirPermiso()">🔔 Activar Alertas en Celular</button>
+    </div>
   </div>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
+ <!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Air Watch - Monitoreo de Aire</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #fff; text-align: center; margin: 0; padding: 20px; }
+    .container { max-width: 450px; margin: 0 auto; }
+    .card { background: #1e1e1e; padding: 25px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); margin-top: 20px; }
+    .status-box { font-size: 24px; font-weight: bold; padding: 15px; border-radius: 10px; margin: 20px 0; background: #333; }
+    .ppm-value { font-size: 48px; font-weight: bold; margin: 10px 0; color: #4fc3f7; }
+    .btn { background: #6200ee; color: #fff; border: none; padding: 14px 24px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; width: 100%; }
+    .btn:hover { background: #3700b3; }
+    /* Colores por estado */
+    .BUENO { background: #2e7d32; color: #fff; }
+    .MODERADO { background: #f9a825; color: #000; }
+    .MALO { background: #c62828; color: #fff; }
+    .MUY_MALO { background: #6a1b9a; color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>💨 Air Watch</h1>
+    <div class="card">
+      <div class="ppm-value" id="ppm">-- PPM</div>
+      <div class="status-box" id="estado">Cargando...</div>
+      <p id="ultima-act" style="color: #aaa; font-size: 12px;"></p>
+      <button class="btn" onclick="pedirPermiso()">🔔 Activar Alertas en Celular</button>
+    </div>
+  </div>
 
-    // Configuración pública Web de tu proyecto Firebase (Air Watch)
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getMessaging, getToken } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
+
     const firebaseConfig = {
       apiKey: "AIzaSyDrFnhFaTJ41H2n5l5lVXT8XONJF1m10fo",
       authDomain: "air-watch-2635a.firebaseapp.com",
@@ -32,8 +75,7 @@
       projectId: "air-watch-2635a",
       storageBucket: "air-watch-2635a.firebasestorage.app",
       messagingSenderId: "295549508237",
-      appId: "1:295549508237:web:2fd5297bc7efc58576a0c4",
-      measurementId: "G-S83X31TQPD"
+      appId: "1:295549508237:web:2fd5297bc7efc58576a0c4"
     };
 
     const app = initializeApp(firebaseConfig);
@@ -46,32 +88,39 @@
           const token = await getToken(messaging, { 
             vapidKey: 'BPw-Vf7Sa174ormC8X5m45MlKr1s97IRIWdznssS8jh5WsL4hXiwd7gRYCHd5-cTLq4nDJb_YRvgaNrjaIpBjps' 
           });
-          alert('¡Notificaciones activadas con éxito!');
-          console.log('FCM Token:', token);
+          alert('¡Notificaciones activadas!');
         } else {
-          alert('Permiso denegado para notificaciones.');
+          alert('Permiso denegado.');
         }
       } catch (err) {
         console.error('Error al pedir permiso:', err);
       }
     };
 
-    // Consultar datos actuales del Backend
-    async function cargarDatos() {
+    // Consultar datos de la ESP32 enviados al backend
+    async function actualizarPantalla() {
       try {
         const res = await fetch('/api/air-quality/current');
         const data = await res.json();
-        if (data.success) {
-          document.getElementById('ppm').innerText = `PPM: ${data.datos.ppm}`;
-          document.getElementById('estado').innerText = `Estado: ${data.datos.estado}`;
+        if (data.success && data.datos) {
+          const ppm = data.datos.ppm;
+          const estado = data.datos.estado;
+
+          document.getElementById('ppm').innerText = `${ppm} PPM`;
+          
+          const estadoElem = document.getElementById('estado');
+          estadoElem.innerText = estado;
+          estadoElem.className = `status-box ${estado.replace(' ', '_')}`;
+
+          document.getElementById('ultima-act').innerText = `Última lectura: ${new Date().toLocaleTimeString()}`;
         }
       } catch (e) {
-        console.error("Error al cargar datos:", e);
+        console.error("Error obteniendo datos:", e);
       }
     }
 
-    cargarDatos();
-    setInterval(cargarDatos, 5000);
+    actualizarPantalla();
+    setInterval(actualizarPantalla, 3000); // Actualiza cada 3 segundos
   </script>
 </body>
 </html>
