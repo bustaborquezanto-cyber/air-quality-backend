@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monitoreo de Calidad del Aire</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #121212; color: #fff; text-align: center; padding: 20px; }
+    .card { background: #1e1e1e; padding: 20px; border-radius: 12px; max-width: 400px; margin: 20px auto; }
+    .btn { background: #6200ee; color: #fff; border: none; padding: 12px 20px; border-radius: 8px; font-size: 16px; cursor: pointer; }
+    .btn:hover { background: #3700b3; }
+  </style>
+</head>
+<body>
+  <h1>💨 Calidad del Aire IoT</h1>
+  <div class="card">
+    <h2>Estado Actual</h2>
+    <p id="ppm">Cargando datos...</p>
+    <p id="estado">...</p>
+    <button class="btn" onclick="pedirPermiso()">🔔 Activar Notificaciones Push</button>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js";
+
+    // Configuración pública Web de tu proyecto Firebase (Air Watch)
+    const firebaseConfig = {
+      apiKey: "AIzaSyDrFnhFaTJ41H2n5l5lVXT8XONJF1m10fo",
+      authDomain: "air-watch-2635a.firebaseapp.com",
+      databaseURL: "https://air-watch-2635a-default-rtdb.firebaseio.com",
+      projectId: "air-watch-2635a",
+      storageBucket: "air-watch-2635a.firebasestorage.app",
+      messagingSenderId: "295549508237",
+      appId: "1:295549508237:web:2fd5297bc7efc58576a0c4",
+      measurementId: "G-S83X31TQPD"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const messaging = getMessaging(app);
+
+    window.pedirPermiso = async function() {
+      try {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          const token = await getToken(messaging, { 
+            vapidKey: 'BPw-Vf7Sa174ormC8X5m45MlKr1s97IRIWdznssS8jh5WsL4hXiwd7gRYCHd5-cTLq4nDJb_YRvgaNrjaIpBjps' 
+          });
+          alert('¡Notificaciones activadas con éxito!');
+          console.log('FCM Token:', token);
+        } else {
+          alert('Permiso denegado para notificaciones.');
+        }
+      } catch (err) {
+        console.error('Error al pedir permiso:', err);
+      }
+    };
+
+    // Consultar datos actuales del Backend
+    async function cargarDatos() {
+      try {
+        const res = await fetch('/api/air-quality/current');
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById('ppm').innerText = `PPM: ${data.datos.ppm}`;
+          document.getElementById('estado').innerText = `Estado: ${data.datos.estado}`;
+        }
+      } catch (e) {
+        console.error("Error al cargar datos:", e);
+      }
+    }
+
+    cargarDatos();
+    setInterval(cargarDatos, 5000);
+  </script>
+</body>
+</html>
