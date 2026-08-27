@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
+const { getMessaging } = require('firebase-admin/messaging');
 
 const app = express();
 app.use(cors());
@@ -33,6 +34,7 @@ initializeApp({
 });
 
 const db = getFirestore();
+const messaging = getMessaging();
 console.log("✅ Firebase conectado correctamente");
 
 // ============================================================
@@ -102,7 +104,7 @@ app.post('/api/air-quality', async (req, res) => {
       };
 
       // Programar notificación en 30 segundos
-      temporizadorConfirmacion = setTimeout(() => {
+      temporizadorConfirmacion = setTimeout(async () => {
         if (estadoActualGlobal.estado === estado) {
           const notificacion = {
             id: Date.now(),
@@ -117,13 +119,31 @@ app.post('/api/air-quality', async (req, res) => {
           historialNotificaciones.unshift(notificacion);
           if (historialNotificaciones.length > 50) historialNotificaciones.pop();
 
-          console.log(`✅ NOTIFICACIÓN ENVIADA: ${estado} (${ppm} PPM)`);
+          console.log(`✅ NOTIFICACIÓN LOCAL REGISTRADA: ${estado} (${ppm} PPM)`);
           
+          // 1. Guardar en Firestore
           try {
-            db.collection('notificaciones').add(notificacion);
+            await db.collection('notificaciones').add(notificacion);
           } catch (e) {
-            console.error("Error guardando notificación:", e.message);
+            console.error("Error guardando notificación en DB:", e.message);
           }
+
+          // 2. ENVIAR NOTIFICACIÓN PUSH AL CELULAR VÍA FCM
+          const payloadPush = {
+            notification: {
+              title: '⚠️ Alerta de Calidad del Aire',
+              body: `El estado del aire cambió a ${estado} (${ppm} PPM)`
+            },
+            topic: 'calidad_aire' // Canal/Tema al que está suscrito tu celular
+          };
+
+          try {
+            const pushResponse = await messaging.send(payloadPush);
+            console.log('📲 Notificación PUSH enviada con éxito:', pushResponse);
+          } catch (pushError) {
+            console.error('❌ Error enviando PUSH:', pushError.message);
+          }
+
         } else {
           console.log(`⏭️ Notificación cancelada: el estado cambió nuevamente`);
         }
@@ -170,7 +190,6 @@ app.get('/api/air-quality/history', async (req, res) => {
   try {
     const hace24Horas = new Date(Date.now() - 24 * 60 * 60 * 1000);
     
-    // Se elimina el .orderBy para evitar pedir índices compuestos a Firestore
     const snapshot = await db.collection('lecturas')
       .where('timestamp', '>=', hace24Horas)
       .limit(1000)
