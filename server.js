@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
@@ -9,36 +10,39 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================================
-// CONFIGURACIÓN DE FIREBASE - VERSIÓN PARA RENDER
+// SERVIR EL FRONTEND (index.html) Y SERVICE WORKER
+// ============================================================
+app.use(express.static(__dirname));
+
+// Esta es la ÚNICA ruta para la raíz
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// ============================================================
+// CONFIGURACIÓN DE FIREBASE ADMIN SDK
 // ============================================================
 let serviceAccount;
 try {
-  // PRIMERO: Intentar usar la variable de entorno de Render
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    console.log("📦 Usando credenciales desde Variable de Entorno");
     serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
   } else {
-    // SEGUNDO: Si no existe variable, buscar el archivo local (para desarrollo)
-    console.log("📁 Buscando archivo local serviceAccountKey.json");
     serviceAccount = require('./serviceAccountKey.json');
   }
 } catch (err) {
-  console.error("❌ Error al cargar las credenciales de Firebase:", err.message);
-  console.error("💡 Asegúrate de configurar FIREBASE_SERVICE_ACCOUNT en Render");
+  console.error("❌ Error al cargar credenciales de Firebase:", err.message);
   process.exit(1);
 }
 
-// Inicializar Firebase Admin
 initializeApp({
   credential: cert(serviceAccount)
 });
 
 const db = getFirestore();
 const messaging = getMessaging();
-console.log("✅ Firebase conectado correctamente");
 
 // ============================================================
-// VARIABLES DE ESTADO
+// VARIABLES DE ESTADO Y CONTROL
 // ============================================================
 let estadoActualGlobal = {
   ppm: 0,
@@ -52,22 +56,17 @@ const TIEMPO_CONFIRMACION_MS = 30000;
 let historialNotificaciones = [];
 
 // ============================================================
-// ENDPOINT POST - Recibir datos del ESP32
+// ENDPOINT POST - Recibir datos de la ESP32 / Arduino
 // ============================================================
 app.post('/api/air-quality', async (req, res) => {
   try {
     const { ppm, estado } = req.body;
     
-    // Validar datos
     if (ppm === undefined || !estado) {
-      return res.status(400).json({ 
-        error: "Faltan datos: ppm y estado son requeridos" 
-      });
+      return res.status(400).json({ error: "Faltan datos: ppm y estado son requeridos" });
     }
 
     const estadoPrevio = estadoActualGlobal.estado;
-    console.log(`📨 Recibido: ${ppm} PPM - ${estado}`);
-
     const nuevoRegistro = {
       ppm: parseFloat(ppm),
       estado: estado,
@@ -77,38 +76,24 @@ app.post('/api/air-quality', async (req, res) => {
 
     estadoActualGlobal = nuevoRegistro;
 
-    // Guardar en Firestore
     try {
       await db.collection('lecturas').add(nuevoRegistro);
-      console.log("💾 Datos guardados en Firestore");
     } catch (dbError) {
-      console.error("⚠️ Error guardando en Firestore:", dbError.message);
+      console.error("Error guardando lectura:", dbError.message);
     }
 
-    // ============================================================
-    // LÓGICA DE NOTIFICACIONES (CON RETRASO DE 30 SEGUNDOS)
-    // ============================================================
     if (estado !== estadoPrevio) {
-      console.log(`🔄 Cambio detectado: ${estadoPrevio} → ${estado}`);
-      
-      // Cancelar notificación pendiente anterior
       if (temporizadorConfirmacion) {
         clearTimeout(temporizadorConfirmacion);
-        temporizadorConfirmacion = null;
       }
 
-      // Guardar estado pendiente
-      estadoPendiente = { 
-        nuevoEstado: estado, 
-        tiempoDetectado: Date.now() 
-      };
+      estadoPendiente = { nuevoEstado: estado, tiempoDetectado: Date.now() };
 
-      // Programar notificación en 30 segundos
       temporizadorConfirmacion = setTimeout(async () => {
         if (estadoActualGlobal.estado === estado) {
           const notificacion = {
             id: Date.now(),
-            mensaje: `🔔 Calidad del aire cambió a ${estado}`,
+            mensaje: `🔔 La calidad del aire cambió a ${estado}`,
             estadoPrevio: estadoPrevio,
             nuevoEstado: estado,
             ppm: ppm,
@@ -119,56 +104,41 @@ app.post('/api/air-quality', async (req, res) => {
           historialNotificaciones.unshift(notificacion);
           if (historialNotificaciones.length > 50) historialNotificaciones.pop();
 
-          console.log(`✅ NOTIFICACIÓN LOCAL REGISTRADA: ${estado} (${ppm} PPM)`);
-          
-          // 1. Guardar en Firestore
           try {
             await db.collection('notificaciones').add(notificacion);
           } catch (e) {
-            console.error("Error guardando notificación en DB:", e.message);
+            console.error("Error guardando notificación:", e.message);
           }
 
-          // 2. ENVIAR NOTIFICACIÓN PUSH AL CELULAR VÍA FCM
           const payloadPush = {
             notification: {
               title: '⚠️ Alerta de Calidad del Aire',
-              body: `El estado del aire cambió a ${estado} (${ppm} PPM)`
+              body: `El estado cambió de ${estadoPrevio} a ${estado} (${ppm} PPM)`
             },
-            topic: 'calidad_aire' // Canal/Tema al que está suscrito tu celular
+            topic: 'calidad_aire'
           };
 
           try {
-            const pushResponse = await messaging.send(payloadPush);
-            console.log('📲 Notificación PUSH enviada con éxito:', pushResponse);
+            await messaging.send(payloadPush);
           } catch (pushError) {
-            console.error('❌ Error enviando PUSH:', pushError.message);
+            console.error('Error enviando PUSH:', pushError.message);
           }
-
-        } else {
-          console.log(`⏭️ Notificación cancelada: el estado cambió nuevamente`);
         }
         
         estadoPendiente = null;
         temporizadorConfirmacion = null;
       }, TIEMPO_CONFIRMACION_MS);
-      
-      console.log(`⏰ Notificación programada en ${TIEMPO_CONFIRMACION_MS/1000} segundos`);
     }
 
-    res.status(200).json({ 
-      status: "OK", 
-      message: "Lectura guardada correctamente",
-      notificacion_programada: estadoPendiente !== null
-    });
+    res.status(200).json({ status: "OK", message: "Lectura procesada" });
 
   } catch (error) {
-    console.error("❌ Error al procesar datos:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
 // ============================================================
-// ENDPOINT GET - Estado actual
+// ENDPOINTS GET - Consultas para la App Web
 // ============================================================
 app.get('/api/air-quality/current', (req, res) => {
   res.json({
@@ -183,13 +153,9 @@ app.get('/api/air-quality/current', (req, res) => {
   });
 });
 
-// ============================================================
-// ENDPOINT GET - Historial (últimas 24 horas)
-// ============================================================
 app.get('/api/air-quality/history', async (req, res) => {
   try {
     const hace24Horas = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    
     const snapshot = await db.collection('lecturas')
       .where('timestamp', '>=', hace24Horas)
       .limit(1000)
@@ -206,27 +172,11 @@ app.get('/api/air-quality/history', async (req, res) => {
       });
     });
 
-    // Ordenar de forma ascendente en memoria
     historial.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-    res.json({
-      success: true,
-      historial: historial
-    });
+    res.json({ success: true, historial });
   } catch (error) {
-    console.error("❌ Error consultando historial:", error);
     res.status(500).json({ error: error.message });
   }
-});
-
-// ============================================================
-// ENDPOINT GET - Notificaciones
-// ============================================================
-app.get('/api/air-quality/notifications', (req, res) => {
-  res.json({
-    success: true,
-    notificaciones: historialNotificaciones
-  });
 });
 
 // ============================================================
@@ -234,10 +184,5 @@ app.get('/api/air-quality/notifications', (req, res) => {
 // ============================================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor de monitoreo IoT activo en puerto ${PORT}`);
-  console.log(`📡 Endpoints:`);
-  console.log(`   POST /api/air-quality`);
-  console.log(`   GET  /api/air-quality/current`);
-  console.log(`   GET  /api/air-quality/history`);
-  console.log(`   GET  /api/air-quality/notifications`);
+  console.log(`🚀 Servidor activo en puerto ${PORT}`);
 });
