@@ -9,7 +9,7 @@
     .container { max-width: 500px; margin: 0 auto; }
     .card { background: #1e1e1e; padding: 25px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); margin-top: 20px; }
     .status-box { font-size: 24px; font-weight: bold; padding: 15px; border-radius: 10px; margin: 20px 0; background: #333; }
-    .ppm-value { font-size: 48px; font-weight: bold; margin: 10px 0; color: #4fc3f7; }
+    .ppm-value { font-size: 40px; font-weight: bold; margin: 10px 0; color: #4fc3f7; word-break: break-all; }
     .btn { background: #6200ee; color: #fff; border: none; padding: 14px 24px; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; width: 100%; margin-bottom: 10px; }
     .btn:hover { background: #3700b3; }
     .BUENO { background: #2e7d32; color: #fff; }
@@ -17,7 +17,6 @@
     .MALO { background: #c62828; color: #fff; }
     .MUY_MALO { background: #6a1b9a; color: #fff; }
     
-    /* Tabla de Historial */
     table { width: 100%; border-collapse: collapse; margin-top: 15px; background: #252525; border-radius: 8px; overflow: hidden; font-size: 14px; }
     th, td { padding: 10px; text-align: center; border-bottom: 1px solid #333; }
     th { background: #333; color: #4fc3f7; }
@@ -68,7 +67,6 @@
     const app = initializeApp(firebaseConfig);
     const messaging = getMessaging(app);
 
-    // Registrar Service Worker para notificaciones de fondo
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/firebase-messaging-sw.js').catch(err => console.error('Error SW:', err));
     }
@@ -83,7 +81,6 @@
             serviceWorkerRegistration: swReg
           });
 
-          // Enviar token al servidor para suscribir al tópico de alertas
           await fetch('/api/subscribe-topic', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -107,7 +104,8 @@
           const ppm = data.datos.ppm;
           const estado = data.datos.estado;
 
-          document.getElementById('ppm').innerText = `${Number(ppm).toFixed(1)} PPM`;
+          // Muestra el número decimal exacto completo
+          document.getElementById('ppm').innerText = `${ppm} PPM`;
           
           const estadoElem = document.getElementById('estado');
           estadoElem.innerText = estado;
@@ -116,7 +114,6 @@
           document.getElementById('ultima-act').innerText = `Última lectura: ${new Date().toLocaleTimeString()}`;
         }
 
-        // Cargar Historial
         const resHist = await fetch('/api/air-quality/history');
         const dataHist = await resHist.json();
         if (dataHist.success && dataHist.historial) {
@@ -128,7 +125,7 @@
             tbody.innerHTML += `
               <tr>
                 <td>${hora}</td>
-                <td>${Number(item.ppm).toFixed(1)}</td>
+                <td>${item.ppm}</td>
                 <td>${item.estado}</td>
               </tr>
             `;
