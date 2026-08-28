@@ -8,17 +8,17 @@ firebase.initializeApp({
   projectId: "air-watch-2635a",
   storageBucket: "air-watch-2635a.firebasestorage.app",
   messagingSenderId: "295549508237",
-  appId: "1:295549508237:web:2fd5297bc7efc58576a0c4",
-  measurementId: "G-S83X31TQPD"
+  appId: "1:295549508237:web:2fd5297bc7efc58576a0c4"
 });
 
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
-  const notificationTitle = payload.notification.title;
+  console.log('[firebase-messaging-sw.js] Notificación recibida:', payload);
+  
+  const notificationTitle = payload.notification.title || '⚠️ Alerta de Calidad del Aire';
   const notificationOptions = {
-    body: payload.notification.body,
-    icon: '/icon.png'
+    body: payload.notification.body || 'Se ha detectado un cambio en la calidad del aire.'
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);
