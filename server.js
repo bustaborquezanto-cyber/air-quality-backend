@@ -9,19 +9,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ============================================================
-// SERVIR EL FRONTEND (index.html) Y SERVICE WORKER
-// ============================================================
-app.use(express.static(__dirname));
+// Servir la carpeta actual
+app.use(express.static(path.join(__dirname)));
 
-// Esta es la ÚNICA ruta para la raíz
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// ============================================================
-// CONFIGURACIÓN DE FIREBASE ADMIN SDK
-// ============================================================
+// Carga de credenciales
 let serviceAccount;
 try {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
@@ -41,29 +32,40 @@ initializeApp({
 const db = getFirestore();
 const messaging = getMessaging();
 
-// ============================================================
-// VARIABLES DE ESTADO Y CONTROL
-// ============================================================
 let estadoActualGlobal = {
   ppm: 0,
   estado: "DESCONOCIDO",
   timestamp: new Date()
 };
 
-let estadoPendiente = null;
 let temporizadorConfirmacion = null;
 const TIEMPO_CONFIRMACION_MS = 30000;
 let historialNotificaciones = [];
 
-// ============================================================
-// ENDPOINT POST - Recibir datos de la ESP32 / Arduino
-// ============================================================
+// Endpoint POST: Suscribir tokens FCM al tópico 'calidad_aire'
+app.post('/api/subscribe-topic', async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ success: false, error: "Token no proporcionado" });
+    }
+
+    await messaging.subscribeToTopic(token, 'calidad_aire');
+    console.log(`📱 Token suscrito con éxito al tema 'calidad_aire'`);
+    return res.status(200).json({ success: true, message: "Suscrito exitosamente" });
+  } catch (error) {
+    console.error("❌ Error suscribiendo token:", error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Endpoint POST: Recepción de lecturas desde ESP32 o Curl
 app.post('/api/air-quality', async (req, res) => {
   try {
     const { ppm, estado } = req.body;
     
     if (ppm === undefined || !estado) {
-      return res.status(400).json({ error: "Faltan datos: ppm y estado son requeridos" });
+      return res.status(400).json({ error: "Faltan datos requeridos" });
     }
 
     const estadoPrevio = estadoActualGlobal.estado;
@@ -79,7 +81,7 @@ app.post('/api/air-quality', async (req, res) => {
     try {
       await db.collection('lecturas').add(nuevoRegistro);
     } catch (dbError) {
-      console.error("Error guardando lectura:", dbError.message);
+      console.error("Error guardando en Firestore:", dbError.message);
     }
 
     if (estado !== estadoPrevio) {
@@ -87,59 +89,42 @@ app.post('/api/air-quality', async (req, res) => {
         clearTimeout(temporizadorConfirmacion);
       }
 
-      estadoPendiente = { nuevoEstado: estado, tiempoDetectado: Date.now() };
-
       temporizadorConfirmacion = setTimeout(async () => {
         if (estadoActualGlobal.estado === estado) {
-          const notificacion = {
-            id: Date.now(),
-            mensaje: `🔔 La calidad del aire cambió a ${estado}`,
-            estadoPrevio: estadoPrevio,
-            nuevoEstado: estado,
-            ppm: ppm,
-            fecha: new Date().toISOString(),
-            timestamp: Date.now()
-          };
-
-          historialNotificaciones.unshift(notificacion);
-          if (historialNotificaciones.length > 50) historialNotificaciones.pop();
-
-          try {
-            await db.collection('notificaciones').add(notificacion);
-          } catch (e) {
-            console.error("Error guardando notificación:", e.message);
-          }
-
           const payloadPush = {
             notification: {
               title: '⚠️ Alerta de Calidad del Aire',
               body: `El estado cambió de ${estadoPrevio} a ${estado} (${ppm} PPM)`
             },
+            webpush: {
+              notification: {
+                title: '⚠️ Alerta de Calidad del Aire',
+                body: `El estado cambió de ${estadoPrevio} a ${estado} (${ppm} PPM)`,
+                requireInteraction: true
+              }
+            },
             topic: 'calidad_aire'
           };
 
           try {
-            await messaging.send(payloadPush);
+            const resp = await messaging.send(payloadPush);
+            console.log("✅ Notificación push enviada con éxito:", resp);
           } catch (pushError) {
-            console.error('Error enviando PUSH:', pushError.message);
+            console.error('❌ Error enviando PUSH:', pushError.message);
           }
         }
-        
-        estadoPendiente = null;
         temporizadorConfirmacion = null;
       }, TIEMPO_CONFIRMACION_MS);
     }
 
-    res.status(200).json({ status: "OK", message: "Lectura procesada" });
+    res.status(200).json({ status: "OK", message: "Lectura procesada correctamente" });
 
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// ============================================================
-// ENDPOINTS GET - Consultas para la App Web
-// ============================================================
+// Endpoints GET
 app.get('/api/air-quality/current', (req, res) => {
   res.json({
     success: true,
@@ -148,8 +133,7 @@ app.get('/api/air-quality/current', (req, res) => {
       estado: estadoActualGlobal.estado,
       timestamp: estadoActualGlobal.timestamp,
       fecha: estadoActualGlobal.fecha || new Date().toISOString()
-    },
-    notificaciones: historialNotificaciones.slice(0, 10)
+    }
   });
 });
 
@@ -158,7 +142,7 @@ app.get('/api/air-quality/history', async (req, res) => {
     const hace24Horas = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const snapshot = await db.collection('lecturas')
       .where('timestamp', '>=', hace24Horas)
-      .limit(1000)
+      .limit(100)
       .get();
 
     const historial = [];
@@ -167,21 +151,21 @@ app.get('/api/air-quality/history', async (req, res) => {
       historial.push({
         ppm: data.ppm,
         estado: data.estado,
-        timestamp: data.timestamp.toDate ? data.timestamp.toDate() : data.timestamp,
-        fecha: data.fecha || new Date(data.timestamp).toISOString()
+        timestamp: data.timestamp.toDate ? data.timestamp.toDate() : data.timestamp
       });
     });
 
     historial.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
     res.json({ success: true, historial });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.json({ success: true, historial: [] });
   }
 });
 
-// ============================================================
-// INICIAR SERVIDOR
-// ============================================================
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Servidor activo en puerto ${PORT}`);
