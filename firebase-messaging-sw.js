@@ -14,11 +14,12 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
-  console.log('[firebase-messaging-sw.js] Notificación recibida:', payload);
+  console.log('[firebase-messaging-sw.js] Notificación recibida en segundo plano:', payload);
   
-  const notificationTitle = payload.notification.title || '⚠️ Alerta de Calidad del Aire';
+  const notificationTitle = payload.notification ? payload.notification.title : '⚠️ Alerta de Calidad del Aire';
   const notificationOptions = {
-    body: payload.notification.body || 'Se ha detectado un cambio en la calidad del aire.'
+    body: payload.notification ? payload.notification.body : 'Cambio detectado en la calidad del aire.',
+    icon: '/favicon.ico'
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);
